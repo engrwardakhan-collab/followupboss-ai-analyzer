@@ -69,86 +69,32 @@ class FollowUpBossAnalyzer:
         lead_email = lead.get('emails', [{}])[0].get('value', 'N/A') if lead.get('emails') else 'N/A'
         lead_phone = lead.get('phones', [{}])[0].get('value', 'N/A') if lead.get('phones') else 'N/A'
 
-        custom_fields = lead.get('customFields', {})
-        budget = custom_fields.get('customBudget', lead.get('price', 'Not specified'))
-
-        # Extract ALL custom fields to pass to GPT
-        custom_fields_text = ''
-        ai_field_prefixes = ('customAI',)
-        for key, value in custom_fields.items():
-            if value and not key.startswith(ai_field_prefixes):
-                label = key.replace('custom', '').replace('_', ' ')
-                custom_fields_text += f"- {label}: {value}\n"
-
-        # Notes
-        notes_list = lead.get('notes', [])
-        if isinstance(notes_list, list):
-            notes_text = ' | '.join([n.get('body', '') for n in notes_list if n.get('body')])
-        else:
-            notes_text = str(notes_list) if notes_list else 'None'
-
-        calls_val = lead.get('calls', 0)
-        calls_made = calls_val if isinstance(calls_val, int) else len(calls_val)
-        emails_val = lead.get('emailsSent', 0)
-        emails_sent = emails_val if isinstance(emails_val, int) else len(emails_val)
-        opened_val = lead.get('emailsOpened', 0)
-        emails_opened = opened_val if isinstance(opened_val, int) else len(opened_val)
-        views_val = lead.get('propertyViews', 0)
-        property_views = views_val if isinstance(views_val, int) else len(views_val)
-
-        last_contact = lead.get('lastContactedAt')
-        days_since_contact = 30
-        if last_contact:
-            from datetime import datetime
-            last_contact_date = datetime.fromisoformat(last_contact.replace('Z', '+00:00'))
-            days_since_contact = (datetime.now(last_contact_date.tzinfo) - last_contact_date).days
+        # Strip existing AI fields so GPT doesn't get confused by old values
+        lead_clean = {k: v for k, v in lead.items() if not k.startswith('customAI')}
 
         prompt = f"""
-Analyze this real estate lead and provide 6 AI insights in JSON format.
-Pay close attention to the notes and custom fields — they contain the most important signals about urgency and intent.
+You are a real estate CRM analyst. Below is the complete data for a lead. Analyze ALL fields —
+especially notes, custom fields, move-in date, urgency signals — and return 6 AI insights.
 
-LEAD INFORMATION:
-- Name: {lead_name}
-- Email: {lead_email}
-- Phone: {lead_phone}
-- Budget: {budget}
-- Stage: {lead.get('stage', 'Not specified')}
-- Type: {lead.get('type', 'Not specified')}
-- Source: {lead.get('source', 'Not specified')}
+FULL LEAD DATA:
+{json.dumps(lead_clean, indent=2)}
 
-NOTES FROM LEAD:
-{notes_text if notes_text else 'None'}
-
-CUSTOM FIELDS:
-{custom_fields_text if custom_fields_text else 'None'}
-
-ACTIVITY METRICS:
-- Calls made: {calls_made}
-- Emails sent: {emails_sent}
-- Emails opened: {emails_opened}
-- Property views: {property_views}
-- Days since last contact: {days_since_contact}
-
-Provide analysis as JSON with these 6 fields (ONLY JSON, no other text):
+Based on everything above, return ONLY a JSON object (no other text):
 
 {{
   "ai_score": <number 1-10>,
-  "ai_score_reasoning": "<why this score in 1 sentence>",
-  "next_action": "<specific action to take>",
-  "email_draft": "<2-3 sentence personalized email ready to send>",
-  "risk_factors": "<red flags or concerns, or 'None identified'>",
+  "ai_score_reasoning": "<why this score, referencing specific data from the lead>",
+  "next_action": "<specific actionable next step based on their needs>",
+  "email_draft": "<2-3 sentence personalized email using their name, unit type, move-in date, and notes>",
+  "risk_factors": "<any red flags or 'None identified'>",
   "buyer_type": "<one of: Serious Buyer, Window Shopper, Just Curious, Investor, First-time Buyer>",
   "followup_time": "<one of: ASAP (Follow up today!), This week, In 2 weeks, Re-engage in 30 days>"
 }}
 
-GUIDELINES:
-- If notes mention urgency (moving soon, urgent, ASAP) → score 8-10, Serious Buyer, ASAP follow-up
-- Score 8-10: Hot lead (urgent need, clear intent, specific requirements)
-- Score 6-7: Warm lead (some engagement, moderate interest)
-- Score 1-5: Cold lead (low engagement, no urgency, vague interest)
-- Next action should reference specific details from their notes/custom fields
-- Email should be personalized using their name, move-in date, unit type, and any notes
-- Buyer type must reflect urgency signals from notes — do not default to Just Curious if notes show intent
+SCORING RULES:
+- Notes/custom fields saying urgent, ASAP, moving soon, specific move-in date → score 8-10, Serious Buyer, ASAP
+- Some engagement, moderate interest → score 6-7, This week
+- No urgency, vague interest → score 1-5
 """
 
         print(f"  [AI] Analyzing {lead_name} with GPT-4o...")
@@ -233,6 +179,9 @@ GUIDELINES:
         if not full_lead:
             print(f"  [WARN] Could not fetch full lead, using Make data instead")
             full_lead = lead
+
+        # Log exactly what we received from FUB
+        print(f"  [DEBUG] Full lead data from FUB: {json.dumps(full_lead, indent=2)}")
 
         insights = self.analyze_lead_with_gpt(full_lead)
         if insights:
