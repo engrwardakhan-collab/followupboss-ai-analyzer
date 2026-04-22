@@ -208,12 +208,33 @@ GUIDELINES:
             print(f"  [WARN] Error updating lead: {e}")
             return False
 
+    def fetch_full_lead(self, lead_id):
+        """Fetch complete lead data from FUB including notes and all custom fields"""
+        try:
+            response = self.session.get(
+                f'{self.fub_base_url}/people/{lead_id}',
+                headers=self.headers,
+                params={'fields': 'allFields'}
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"  [ERROR] Failed to fetch full lead: {e}")
+            return None
+
     def process_single_lead(self, lead):
-        """Process one lead received from Make.com"""
+        """Process one lead received from Make.com — always fetches full data from FUB"""
         lead_id = lead.get('id')
         lead_name = f"{lead.get('firstName', '')} {lead.get('lastName', '')}".strip()
         print(f"\n[>>] Processing lead from Make: {lead_name} (ID: {lead_id})")
-        insights = self.analyze_lead_with_gpt(lead)
+
+        # Fetch full lead data from FUB (Make only sends basic fields)
+        full_lead = self.fetch_full_lead(lead_id)
+        if not full_lead:
+            print(f"  [WARN] Could not fetch full lead, using Make data instead")
+            full_lead = lead
+
+        insights = self.analyze_lead_with_gpt(full_lead)
         if insights:
             self.update_lead_with_insights(lead_id, insights)
             return insights
