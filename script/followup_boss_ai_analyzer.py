@@ -70,8 +70,22 @@ class FollowUpBossAnalyzer:
         lead_phone = lead.get('phones', [{}])[0].get('value', 'N/A') if lead.get('phones') else 'N/A'
 
         custom_fields = lead.get('customFields', {})
-        property_interest = custom_fields.get('customPropertyInterest', 'Not specified')
         budget = custom_fields.get('customBudget', lead.get('price', 'Not specified'))
+
+        # Extract ALL custom fields to pass to GPT
+        custom_fields_text = ''
+        ai_field_prefixes = ('customAI',)
+        for key, value in custom_fields.items():
+            if value and not key.startswith(ai_field_prefixes):
+                label = key.replace('custom', '').replace('_', ' ')
+                custom_fields_text += f"- {label}: {value}\n"
+
+        # Notes
+        notes_list = lead.get('notes', [])
+        if isinstance(notes_list, list):
+            notes_text = ' | '.join([n.get('body', '') for n in notes_list if n.get('body')])
+        else:
+            notes_text = str(notes_list) if notes_list else 'None'
 
         calls_val = lead.get('calls', 0)
         calls_made = calls_val if isinstance(calls_val, int) else len(calls_val)
@@ -91,13 +105,22 @@ class FollowUpBossAnalyzer:
 
         prompt = f"""
 Analyze this real estate lead and provide 6 AI insights in JSON format.
+Pay close attention to the notes and custom fields — they contain the most important signals about urgency and intent.
 
 LEAD INFORMATION:
 - Name: {lead_name}
 - Email: {lead_email}
 - Phone: {lead_phone}
-- Property Interest: {property_interest}
 - Budget: {budget}
+- Stage: {lead.get('stage', 'Not specified')}
+- Type: {lead.get('type', 'Not specified')}
+- Source: {lead.get('source', 'Not specified')}
+
+NOTES FROM LEAD:
+{notes_text if notes_text else 'None'}
+
+CUSTOM FIELDS:
+{custom_fields_text if custom_fields_text else 'None'}
 
 ACTIVITY METRICS:
 - Calls made: {calls_made}
@@ -119,14 +142,13 @@ Provide analysis as JSON with these 6 fields (ONLY JSON, no other text):
 }}
 
 GUIDELINES:
-- Score 8-10: Hot lead (high engagement, recent contact, clear interest)
+- If notes mention urgency (moving soon, urgent, ASAP) → score 8-10, Serious Buyer, ASAP follow-up
+- Score 8-10: Hot lead (urgent need, clear intent, specific requirements)
 - Score 6-7: Warm lead (some engagement, moderate interest)
-- Score 1-5: Cold lead (low engagement, long time since contact)
-- Next action should be specific and actionable
-- Email should be personalized based on their interest and history
-- Risk factors might include: long time since contact, low engagement, no property views yet
-- Buyer type based on engagement level and behavior
-- Follow-up time based on urgency and engagement
+- Score 1-5: Cold lead (low engagement, no urgency, vague interest)
+- Next action should reference specific details from their notes/custom fields
+- Email should be personalized using their name, move-in date, unit type, and any notes
+- Buyer type must reflect urgency signals from notes — do not default to Just Curious if notes show intent
 """
 
         print(f"  [AI] Analyzing {lead_name} with GPT-4o...")
